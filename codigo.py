@@ -1,9 +1,23 @@
+# CÓDIGO DESENVOLVIDO DURANTE A DISCIPLINA DE PROGRAMAÇÃO PARALELA E DISTRIBUÍDA (PPD)
+# UNIVERSIDADE: INSTITUTO FEDERAL DE EDUCAÇÃO, CIÊNCIA E TECNOLOGIA DO CEARÁ (IFCE) - CAMPUS FORTALEZA
+# CURSO: ENGENHARIA DA COMPUTAÇÃO
+# DATA: 06/02/2025
+# DENSENVOLVEDOR: JOSÉ EDILSON CEARÁ GOMES FILHO
+
+# INSTRUÇÕES
+# 1. EXECUTE O ARQUIVO codigo.py
+# 2. INTERAJA COM OS CAMPOS DA INTERFACE DO GERENCIADOR DE EQUIPAMENTOS, INSERINDO/REMOVENDO OS SENSORES E DEFININDO SEUS PARÂMETROS DA FORMA QUE PREFERIR
+# 3. NA PARTE CENTRAL DA TELA SERÁ MOSTRADO O SENSOR E O VALOR E SUA MEDIÇÃO
+# 4. NA PARTE INFERIOR DA TELA SERÁ MOSTRADO O LOG COM REGISTRO DOS MOMENTOS EM QUE O SENSOR ULTRAPASSOU OS LIMITES MÁXIMO OU MÁNIMO DEFINIDOS COMO PARÂMETRO
+
+##################################################################################################################
+
 import paho.mqtt.client as mqtt
 import random
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 import datetime
 
 # Configuração do Broker MQTT
@@ -13,29 +27,42 @@ TOPIC_PREFIX = "sensor_network/"
 
 equipamentos = []
 
+# Dicionário para armazenar cores únicas por equipamento
+cores_equipamentos = {}
+
+# Lista de cores para os alertas
+cores_disponiveis = ["#FFDDC1", "#C1FFD7", "#D1C1FF", "#FFC1E3", "#C1E3FF"]
+
+def obter_cor_equipamento(nome):
+    """Retorna uma cor para o equipamento, garantindo que cada um tenha uma cor única."""
+    if nome not in cores_equipamentos:
+        cor = cores_disponiveis[len(cores_equipamentos) % len(cores_disponiveis)]
+        cores_equipamentos[nome] = cor
+    return cores_equipamentos[nome]
 
 def generate_sensor_value(equipamento):
-
     while equipamento["ligado"]:
         valor = int(random.uniform(equipamento["min"] * 0.9, equipamento["max"] * 1.1))
         equipamento["valor"] = valor
 
         if valor < equipamento["min"] or valor > equipamento["max"]:
             timestamp = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            mensagem = f"[{timestamp}] ALERTA! {equipamento['nome']} atingiu o valor crítico: {valor}"
-                
-            equipamento["client"].publish(equipamento["topic"], mensagem)  # Envia via MQTT
-            equipamento["alarmes"].append(mensagem)  # Armazena localmente
+            mensagem = f"[{timestamp}] ALERTA! {equipamento['nome']} atingiu um valor crítico: {valor}"
+            
+            if mensagem not in equipamento["alarmes"]:
+                equipamento["client"].publish(equipamento["topic"], mensagem)
+                equipamento["alarmes"].append(mensagem)
                 
         atualizar_interface()
         time.sleep(1)
 
-
 def on_message(client, userdata, msg):
     for equipamento in equipamentos:
         if msg.topic == equipamento["topic"]:
-            equipamento["alarmes"].append(msg.payload.decode())
-            atualizar_interface()
+            mensagem = msg.payload.decode()
+            if mensagem not in equipamento["alarmes"]:
+                equipamento["alarmes"].append(mensagem)
+                atualizar_interface()
 
 def criar_equipamento(nome, parametro, minimo, maximo):
     topic = TOPIC_PREFIX + nome
@@ -71,6 +98,7 @@ def desligar_equipamento(nome):
     for equipamento in equipamentos:
         if equipamento["nome"] == nome:
             equipamento["ligado"] = False
+            equipamento["valor"] = None  # Reseta o valor ao desligar
             atualizar_interface()
 
 def remover_equipamento(nome):
@@ -81,18 +109,20 @@ def remover_equipamento(nome):
             atualizar_interface()
             break
 
-
 def atualizar_interface():
     listbox.delete(*listbox.get_children())
     for equipamento in equipamentos:
         status = "Ligado" if equipamento["ligado"] else "Desligado"
-        valor = f"{equipamento['valor']}" if equipamento["valor"] else "-"
+        valor = f"{equipamento['valor']}" if equipamento["ligado"] else "-"
         listbox.insert("", "end", values=(equipamento["nome"], equipamento["parametro"], valor, status))
-    
+
     listbox_alarmes.delete(*listbox_alarmes.get_children())
     for equipamento in equipamentos:
-        for alarme in equipamento["alarmes"]:
-            listbox_alarmes.insert("", "end", values=(equipamento["nome"], alarme))
+        cor_fundo = obter_cor_equipamento(equipamento["nome"])
+        for alarme in reversed(equipamento["alarmes"]):  # Agora os mais recentes vêm primeiro
+            listbox_alarmes.insert("", "end", values=(equipamento["nome"], alarme), tags=(equipamento["nome"],))
+            listbox_alarmes.tag_configure(equipamento["nome"], background=cor_fundo)
+
 
 def adicionar_equipamento():
     nome = entry_nome.get()
@@ -113,7 +143,6 @@ def toggle_equipamento():
 def remover_equipamento_interface():
     nome = entry_nome.get()
     remover_equipamento(nome)
-
 
 # Interface gráfica
 root = tk.Tk()
@@ -150,23 +179,22 @@ btn_remove = tk.Button(frame, text="Remover Equipamento", command=remover_equipa
 btn_remove.grid(row=6, column=0, columnspan=2, pady=5)
 
 listbox = ttk.Treeview(root, columns=("Nome", "Parâmetro", "Valor", "Status"), show="headings")
-
-# Definir os títulos das colunas
 listbox.heading("Nome", text="Nome", anchor="center")
 listbox.heading("Parâmetro", text="Parâmetro", anchor="center")
 listbox.heading("Valor", text="Valor", anchor="center")
 listbox.heading("Status", text="Status", anchor="center")
-# Centralizar o conteúdo das colunas
 listbox.column("Nome", anchor="center")
 listbox.column("Parâmetro", anchor="center")
 listbox.column("Valor", anchor="center")
 listbox.column("Status", anchor="center")
 listbox.pack(fill="both", expand=True)
 
-
+# Criando a listbox de alarmes com tags
 listbox_alarmes = ttk.Treeview(root, columns=("Nome", "Alarme"), show="headings")
 listbox_alarmes.heading("Nome", text="Nome", anchor="center")
 listbox_alarmes.heading("Alarme", text="Alarme", anchor="center")
+listbox_alarmes.column("Nome", anchor="center")
+listbox_alarmes.column("Alarme", anchor="center")
 listbox_alarmes.pack(fill="both", expand=True)
 
 root.mainloop()
